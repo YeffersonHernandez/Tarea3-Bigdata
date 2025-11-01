@@ -1,0 +1,135 @@
+1. Verificar versiones de Java y Python
+java -version
+python3 --version
+
+Si Java no está instalado:
+sudo apt install openjdk-17-jdk -y
+
+2. Descargar y mover Kafka 4.0.0
+wget https://downloads.apache.org/kafka/4.0.0/kafka_2.13-4.0.0.tgz
+tar -xzf kafka_2.13-4.0.0.tgz
+sudo mv kafka_2.13-4.0.0 /opt/Kafka
+
+3. Inicializar el almacenamiento KRaft de Kafka
+export KAFKA_CLUSTER_ID=$(/opt/kafka/bin/kafka-storage.sh random-uuid)
+/opt/kafka/bin/kafka-storage.sh format -t $KAFKA_CLUSTER_ID -c /opt/kafka/config/kraft/server.properties
+
+4. Iniciar Kafka
+/opt/Kafka/bin/kafka-server-start.sh /opt/Kafka/config/kraft/server.properties
+
+5. Crear el tópico para recibir los datos
+/opt/Kafka/bin/kafka-topics.sh --create --bootstrap-server localhost:9092 \
+--replication-factor 1 --partitions 1 --topic vehiculos_ev
+
+6. Confirmar que el tópico fue creado
+/opt/Kafka/bin/kafka-topics.sh --list --bootstrap-server localhost:9092
+
+7. Limpiar cachés locales (opcional)
+rm -rf ~/.ivy2/cache/org.apache.spark/*kafka*
+rm -rf ~/.m2/repository/org/apache/spark/*kafka*
+
+8. Crear entorno virtual y activar
+python3 -m venv ~/venv
+source ~/venv/bin/activate
+
+9. Instalar dependencias
+pip install kafka-python
+
+10. Verificar instalación
+pip list
+
+----------------------------------------------------------------------------------------------------------
+nano kafka_producer_ev.py
+
+from kafka import KafkaProducer
+import time
+import requests
+import csv
+import io
+import json
+
+# Crear productor Kafka con serialización JSON
+producer = KafkaProducer(
+    bootstrap_servers='localhost:9092',
+    value_serializer=lambda v: json.dumps(v).encode('utf-8')
+)
+
+# URL del dataset COVID-19
+url = "https://www.datos.gov.co/resource/gt2j-8ykr.csv"
+
+print("Descargando dataset...")
+response = requests.get(url)
+response.encoding = 'utf-8'
+
+# Convertir contenido a objeto tipo archivo
+csv_file = io.StringIO(response.text)
+reader = csv.reader(csv_file)
+
+# Obtener encabezados
+headers = next(reader)
+
+# Enviar cada fila como JSON
+for i, row in enumerate(reader):
+    mensaje = dict(zip(headers, row))  # Crear diccionario con nombres de columna
+    producer.send('covid-colombia', mensaje)
+    print(f"Enviado registro {i+1}: {mensaje}")
+    time.sleep(0.5)
+
+producer.flush()
+print("Envío completado.")
+----------------------------------------------------------------------------------------------------------
+# Ejecutar el productor
+python3 Tarea3_producer.py
+----------------------------------------------------------------------------------------------------------
+
+nano Tarea3_consumer.py
+
+
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import from_json, col
+from pyspark.sql.types import StructType, StringType
+
+spark = SparkSession.builder \
+    .appName("KafkaSparkConsumer") \
+    .master("local[*]") \
+    .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0") \
+    .getOrCreate()
+
+spark.sparkContext.setLogLevel("WARN")
+
+df = spark.readStream \
+    .format("kafka") \
+    .option("kafka.bootstrap.servers", "localhost:9092") \
+    .option("subscribe", "covid-colombia") \
+    .option("startingOffsets", "earliest") \
+    .load()
+
+df_string = df.selectExpr("CAST(value AS STRING)")
+
+schema = StructType() \
+    .add("departamento", StringType()) \
+    .add("ciudad_de_ubicacion", StringType()) \
+    .add("estado", StringType()) \
+    .add("edad", StringType()) \
+    .add("sexo", StringType()) \
+    .add("fecha_inicio_sintomas", StringType()) \
+    .add("fecha_diagnostico", StringType()) \
+    .add("fecha_recuperado", StringType()) \
+    .add("fecha_reporte_web", StringType()) \
+    .add("tipo_recuperacion", StringType()) \
+    .add("nombre_grupo_etnico", StringType())
+
+df_parsed = df_string.select(from_json(col("value"), schema).alias("data")).select("data>
+
+df_filtered = df_parsed.filter(col("departamento").isNotNull())
+
+query = df_filtered.groupBy("departamento").count() \
+    .writeStream \
+    .outputMode("complete") \
+    .format("console") \
+    .start()
+
+query.awaitTermination()
+----------------------------------------------------------------------------------------------------------
+# Ejecutar el consumidor
+pythom3 Tarea3_consumer.py
