@@ -1,0 +1,65 @@
+sudo update-alternatives --config java
+java -version
+sudo update-alternatives --config java
+pyspark --conf spark.hadoop.fs.defaultFS=hdfs://localhost:9000
+
+CARGAR CONJUNTO DE DATOS DESDE HDFS
+
+df = spark.read.option("header", "true") \
+    .option("inferSchema", "true") \
+    .csv("hdfs://localhost:9000/Tarea3/gt2j-8ykr.csv")
+
+MOSTRAR LOS PRIMEROS 10 REGISTROS
+df.show(10, truncate=False)
+--------------------------------------------------------------------------
+
+LIMPIEZA DE DATOS
+
+ELIMINAR DUPLICADOS
+df = df.dropDuplicates()
+
+ELIMINAR REGISTROS CON CAMPOS CRITICOS NULOS
+df = df.na.drop(subset=["id_de_caso", "edad", "estado","fecha_diagnostico", "departamento", "sexo"])
+
+FILTRAR REGISTRAS CON EDAD Y FECHAS VALIDAS
+df = df.filter((df.edad > 0) & (df.fecha_diagnostico.isNotNull()))
+
+VALIDAR LIMPIEZA
+df.select("departamento", "estado", "edad").show(5)
+df.groupBy("estado").count().show()
+df.describe(["edad"]).show()
+--------------------------------------------------------------------------
+
+TRANSFORMACION Y ANALISIS BASICOS
+
+df.printSchema()
+
+DEPARTAMENTO CON MAS CASOS
+df.groupBy("departamento").count().orderBy("count",ascending=False).show(10)
+
+ESTADOS CLINICOS MAS FRECUENTES
+df.groupBy("estado").count().orderBy("count", ascending=False).show()
+
+DISTRIBUCION POR SEXO
+df.groupBy("sexo").count().orderBy("count", ascending=False).show()
+
+--------------------------------------------------------------------------
+ANALISIS EXPLORATORIO
+
+CASOS POR DEPARTAMENTO
+df.groupBy("departamento").count().orderBy("count", ascending=False).show(10)
+
+CASOS POR TIPO DE CONTAGIO
+df.groupBy("fuente_tipo_contagio").count().orderBy("count", ascending=False).show()
+
+CASOS POR SEXO
+df.groupBy("sexo").count().orderBy("count", ascending=False).show()
+
+--------------------------------------------------------------------------
+GUARDAR EL DATAFRAME
+
+df.write.mode("overwrite") \ .option("header", "true") \
+    .csv("hdfs://localhost:9000/Tarea3/departamento")
+departamento("overwrite") \
+    .option("header", "true") \
+    .csv("hdfs://localhost:9000/Tarea3/departamento")
